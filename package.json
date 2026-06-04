@@ -1,0 +1,50 @@
+{
+  "name": "codex-mcp-tool",
+  "version": "0.1.0",
+  "description": "MCP server for Codex CLI integration",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "codex-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "test": "node scripts/run-tests.mjs unit integration",
+    "test:unit": "node scripts/run-tests.mjs unit",
+    "test:integration": "node scripts/run-tests.mjs integration",
+    "test:e2e": "npm run build && node scripts/run-tests.mjs e2e",
+    "test:judge": "node scripts/run-tests.mjs judge",
+    "lint": "tsc -p tsconfig.test.json",
+    "prepublishOnly": "echo '⚠️  Remember to test locally first!' && npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "codex",
+    "cli",
+    "ai",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
