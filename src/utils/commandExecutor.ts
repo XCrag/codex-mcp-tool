@@ -1,6 +1,72 @@
-import { spawn, execSync } from "child_process";
+import { spawn, execSync, ChildProcess } from "child_process";
 import { Logger } from "./logger.js";
 import { CLI, ENV } from "../constants.js";
+
+const activeChildProcesses = new Set<ChildProcess>();
+
+function waitForClose(childProcess: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      childProcess.off("close", onClose);
+      resolve(false);
+    }, timeoutMs);
+    timeout.unref();
+
+    const onClose = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+
+    childProcess.once("close", onClose);
+  });
+}
+
+function signalChildProcess(childProcess: ChildProcess, signal: NodeJS.Signals): void {
+  if (childProcess.exitCode !== null || childProcess.signalCode !== null) return;
+
+  try {
+    if (process.platform !== "win32" && childProcess.pid) {
+      process.kill(-childProcess.pid, signal);
+    } else {
+      childProcess.kill(signal);
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH") {
+      Logger.error(`Failed to signal child process: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+export function getActiveCommandCount(): number {
+  return activeChildProcesses.size;
+}
+
+export async function terminateActiveCommands(graceMs: number = 2000): Promise<void> {
+  const childProcesses = Array.from(activeChildProcesses);
+  if (childProcesses.length === 0) return;
+
+  Logger.warn(`Terminating ${childProcesses.length} active command process(es)`);
+
+  for (const childProcess of childProcesses) {
+    signalChildProcess(childProcess, "SIGTERM");
+  }
+
+  const settled = await Promise.all(childProcesses.map((childProcess) => waitForClose(childProcess, graceMs)));
+  const remaining = childProcesses.filter((_childProcess, index) => !settled[index]);
+
+  for (const childProcess of remaining) {
+    signalChildProcess(childProcess, "SIGKILL");
+  }
+
+  if (remaining.length > 0) {
+    await Promise.all(remaining.map((childProcess) => waitForClose(childProcess, graceMs)));
+  }
+}
 
 // Quote a single argument for cmd.exe (used by spawn's shell:true on Windows).
 // Embedded quotes are doubled and backslash runs before a quote (or the closing
@@ -123,10 +189,12 @@ export async function executeCommand(
     // data. windowsHide suppresses the popup console window on Windows.
     const childProcess = spawn(spawnCommand, safeArgs, {
       env: process.env,
+      detached: !isWindows,
       shell: isWindows,
       windowsHide: true,
       stdio: [stdinData !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
     });
+    activeChildProcesses.add(childProcess);
 
     if (stdinData !== undefined && childProcess.stdin) {
       // If the child has already exited/closed its stdin, write() emits EPIPE on
@@ -160,6 +228,7 @@ export async function executeCommand(
     });
 
     childProcess.on("error", (error) => {
+      activeChildProcesses.delete(childProcess);
       if (isResolved) return;
       isResolved = true;
       Logger.error(`Process error:`, error);
@@ -171,6 +240,7 @@ export async function executeCommand(
       }
     });
     childProcess.on("close", (code) => {
+      activeChildProcesses.delete(childProcess);
       if (isResolved) return;
       isResolved = true;
       if (code === 0) {

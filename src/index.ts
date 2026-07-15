@@ -17,6 +17,7 @@ import {
   CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from "./utils/logger.js";
+import { terminateActiveCommands } from "./utils/commandExecutor.js";
 import { PROTOCOL, ToolArguments } from "./constants.js";
 
 import {
@@ -41,6 +42,20 @@ const server = new Server(
 );
 
 let isProcessing = false; let currentOperationName = ""; let latestOutput = "";
+let isShuttingDown = false;
+
+async function shutdown(reason: string, exitCode?: number): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  Logger.warn(`Shutting down codex-mcp-tool: ${reason}`);
+  isProcessing = false;
+  await terminateActiveCommands();
+
+  if (exitCode !== undefined) {
+    process.exit(exitCode);
+  }
+}
 
 async function sendNotification(method: string, params: any) {
   try {
@@ -252,6 +267,16 @@ server.setRequestHandler(GetPromptRequestSchema, async (request: GetPromptReques
 // Start the server
 async function main() {
   Logger.debug("init codex-mcp-tool");
-  const transport = new StdioServerTransport(); await server.connect(transport);
+  const transport = new StdioServerTransport();
+  transport.onclose = () => {
+    void shutdown("stdio transport closed");
+  };
+  await server.connect(transport);
+  process.once("SIGINT", () => {
+    void shutdown("received SIGINT", 0);
+  });
+  process.once("SIGTERM", () => {
+    void shutdown("received SIGTERM", 0);
+  });
   Logger.debug("codex-mcp-tool listening on stdio");
 } main().catch((error) => {Logger.error("Fatal error:", error); process.exit(1); });

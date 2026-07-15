@@ -6,6 +6,9 @@ import {
   buildEnoentErrorMessage,
   selectWindowsCodexCandidate,
   CommandError,
+  executeCommand,
+  getActiveCommandCount,
+  terminateActiveCommands,
 } from "../../../src/utils/commandExecutor.js";
 
 describe("Node Utilities: Command Executor & Quoting", () => {
@@ -69,5 +72,18 @@ describe("Node Utilities: Command Executor & Quoting", () => {
     assert.equal(err.stdout, "out-data"); // stdout preserved so codex callers can parse the event stream
     assert.equal(err.stderr, "err-data");
     assert.match(err.message, /exit code 2/);
+  });
+
+  test("terminateActiveCommands stops a running command", async () => {
+    const run = executeCommand(process.execPath, ["-e", "setInterval(() => {}, 1000);"]);
+
+    for (let i = 0; i < 20 && getActiveCommandCount() === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.equal(getActiveCommandCount(), 1);
+    await terminateActiveCommands(100);
+    await assert.rejects(run, /Command failed with exit code/);
+    assert.equal(getActiveCommandCount(), 0);
   });
 });
